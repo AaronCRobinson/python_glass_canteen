@@ -1,0 +1,37 @@
+application: python-glass-canteen
+version: 1
+runtime: python27
+api_version: 1
+threadsafe: true
+
+handlers:
+- url: /media
+  static_dir: media
+  
+- url: /login
+  script: main.app 
+  secure: always
+  
+- url: /signup
+  script: main.app 
+  secure: always
+
+- url: /browse
+  script: main.app 
+  secure: always
+  
+- url: /images/*
+  script: main.app 
+  secure: always
+  
+- url: /.*
+  script: main.app 
+
+# https://developers.google.com/appengine/docs/python/config/appconfig#Custom_Error_Responses
+# NOTE: this does not cover 404 (sounds like only custom GAE errors)
+error_handlers:
+- file: default_error.html
+  
+libraries:
+- name: jinja2
+  version: latest

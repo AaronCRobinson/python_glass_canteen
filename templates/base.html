@@ -1,0 +1,30 @@
+<html>
+	
+    <head>{% block head %}
+	{# Default Header #}
+	
+		{% block scripts %}
+		{# Default scripts #}
+        <script type="text/javascript" src="/media/js/jquery-1.6.2.min.js"></script>
+		{% endblock %}
+
+		
+		{% block css %}
+		{# Default CSS #}
+		<link type="text/css" rel="stylesheet" href="/media/css/main_template.css"/>
+		{% endblock %}
+
+		{# To extend header (more scripts, css, etc.) #}
+		{% block extend_head %}{% endblock %}
+		
+        <title>{% block title %}{% endblock %}</title>
+		
+    {% endblock %}</head>
+	
+    <body>
+		
+        {% block content %} {% endblock %}
+
+    </body>
+
+</html>

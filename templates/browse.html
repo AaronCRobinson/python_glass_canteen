@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{% for blob in blobstore_query %}
+
+<img src="images/{{ blob.filename }}" /><br>
+  
+{% endfor %}
+
+{% endblock %}

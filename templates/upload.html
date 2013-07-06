@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block extend_head %}
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js" ></script>
+
+{% endblock %}
+
+{% block content %}
+
+<form id="upload" action="{{ upload_url }}" method="POST" enctype="multipart/form-data">
+	Upload File: <input type="file" name="file"><br>
+	<input type="submit" name="submit" value="Submit">
+</form>
+
+{% endblock %}

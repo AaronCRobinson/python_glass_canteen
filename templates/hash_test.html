@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block extend_head %}
+
+<script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/sha512.js"></script>
+
+<script type="text/javascript">
+// https://code.google.com/p/crypto-js/
+function GenerateHash()
+{
+	var hash = CryptoJS.SHA512("codeword");
+	document.getElementById("client").innerHTML = hash;
+	return hash
+}
+</script>
+
+<script type="text/javascript">
+	// http://enricorossi.org/blog/2012/python_bottle_and_ajax/
+	var xmlhttp;
+
+	// Are we using a modern browser or ...
+	if (window.XMLHttpRequest) {
+	  // code for IE7+, Firefox, Chrome, Opera, Safari
+	  xmlhttp=new XMLHttpRequest();
+	} else {
+	  // code for IE6, IE5
+	  xmlhttp=new ActiveXObject("Microsoft.XMLHTTP");
+	}
+
+	// This will render the two output which substitute the
+	// elements id="raw" and id="forin"
+	function GetNonce()
+	{
+		if (xmlhttp.readyState==4 && xmlhttp.status==200) {
+			//var jsonobj = JSON.parse(xmlhttp.responseText); 
+			var hash = xmlhttp.responseText;
+			document.getElementById("server").innerHTML = hash;
+		} else {
+			alert("data not available");
+		}
+		hash2 = GenerateHash();
+		document.getElementById("compare").innerHTML = ( hash == hash )
+	}
+
+	// xmlhttp.onreadystatechange = GetArticles;
+	// the GetItems function will be triggered once the ajax
+	// request is terminated.
+	xmlhttp.onload = GetHash;
+
+	// send the request in an async way
+	//var data = new FormData();
+	xmlhttp.open("POST", "/start_auth", true);
+	xmlhttp.send();
+	
+</script>
+
+{% endblock %}
+
+{% block content %}
+
+<p>Client:</p> 
+<div id="client"></div> <br />
+<p>Server:</p>
+<div id="server"></div>
+<p>Comparison Equals:</p>
+<div id="compare"></div>
+
+{% endblock %}
