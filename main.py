@@ -15,27 +15,60 @@ from google.appengine.ext import blobstore
 import hashlib
 
 from google.appengine.ext import db
+
 class User(db.Model):
 	_role_set = set(["admin","user"])
 	name = db.StringProperty(required=True)
 	salt = db.StringProperty(required=True)
 	hash = db.StringProperty(required=True)
+	session_id = db.StringProperty()
+	cookie_secret = db.StringProperty()
 	role = db.StringProperty(required=True, choices=_role_set)
-	cake_day = db.DateProperty()
 	last_login = db.DateProperty()
 	disabled = db.BooleanProperty(indexed=False)
 	email = db.StringProperty()
-
+	
+	def generate_session_id(self): # stored inside cookie
+		self.session_id = hashlib.sha512( os.urandom(32).encode('hex') ).hexdigest()
+		return self.session_id
+		
+	def generate_cookie_secret(self): # stored inside cookie
+		self.cookie_secret = hashlib.sha512( os.urandom(32).encode('hex') ).hexdigest()
+		return self.cookie_secret
+	
 # need to think about salting.
 # avoiding uuid module due to adding another package.
 
 # http://stackoverflow.com/questions/9594125/salt-and-hash-a-password-in-python
 def salt_shaker(password, salt=None):
 	if salt:
-		return hashlib.sha512(password + salt).digest()
+		return hashlib.sha512(password + salt).hexdigest()
 	else:
 		salt = os.urandom(32).encode('hex')
-	return hashlib.sha512(password + salt).digest(), salt
+	return hashlib.sha512(password + salt).hexdigest(), salt
+	
+def set_cookie(username):
+	user = fetch_user(username)
+	session_id = user.generate_session_id()
+	cookie_secret = user.generate_cookie_secret()
+	response.set_cookie("username", username)
+	response.set_cookie("session", session_id, secret=cookie_secret, secure=True)
+	user.put() # update user with cookie_sercret and session_id
+	
+def validate_session_id(username, session_id):
+	user = fetch_user(username)
+	return (session_id == user.session_id)
+	
+# Decorator for requiring authentication
+def require_session(func):
+	def check_session(*args, **kwargs):
+		# NOTE needs to be SSL since secure cookie.
+		user = fetch_user( request.get_cookie("username") )
+		session_id = request.get_cookie("session", secret=user.cookie_secret)
+		if session_id != user.session_id:
+			return "IMPOSTER!!!" # and ask them to login
+		return func(*args, **kwargs)
+	return check_session
 	
 # setup app wrapper
 app = Bottle()
@@ -45,7 +78,7 @@ TEMPLATE_PATH.append("./templates")
 
 def fetch_user(username):
 	# returns user object
-	return GqlQuery("SELECT * FROM User WHERE name = :user", user=username).get()
+	return db.GqlQuery("SELECT * FROM User WHERE name = :user", user=username).get()
 
 @app.route('/signup')
 def signup():
@@ -54,18 +87,21 @@ def signup():
 @app.post('/signup')
 def singup_post():
 	# check user doesn't already exit
-	user = request.forms.get('username')
-	if fetch_user(user):
+	username = request.forms.get('username')
+	if fetch_user(username):
 		# user already exists
-		print "naughty"
+		return "user already exists! naughty you!"
 		# return error?
 	
 	hash, salt = salt_shaker(request.forms.get('pwd'))
 	
-	nu = User(name=new_user, hash=hash, salt=salt)
-	nu.put()
+	User(name=username, hash=hash, salt=salt, role="user").put()
+	
+	#NOTE: consider e-mail confirmation?
+	set_cookie(username)
+	
 	# maybe go to some page saying success?
-	return template('home.html', name=request.forms.get('username'))
+	return template('home.html', name=username)
 
 @app.route('/login')	
 def login():
@@ -84,16 +120,18 @@ def home(name='Stranger'):
     return template('home.html', name=name)
 
 @app.route('/upload')
+@require_session
 def upload():
 	return template( 'upload.html', upload_url = blobstore.create_upload_url('/upload') )
-		
+
 @app.post('/upload')
+@require_session
 def upload_post():
 	# NOTE: consider validating the filename...
 	# beware of file.filename -> it normalizes names; we like our names weird.
 	# consider redirect here
 	return template( 'upload.html', filename = request.files.get('file').raw_filename )
- 		
+ 
 @app.route('/browse')
 def browse_images():
 	# this should be temporary. Bad way of doing this (that is passing that object)
