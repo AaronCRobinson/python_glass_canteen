@@ -14,50 +14,21 @@ from google.appengine.ext import blobstore
 # salted passwords
 import hashlib
 
-from google.appengine.ext import db
-
-class User(db.Model):
-	_role_set = set(["admin","user"])
-	name = db.StringProperty(required=True)
-	salt = db.StringProperty(required=True)
-	hash = db.StringProperty(required=True)
-	session_id = db.StringProperty()
-	cookie_secret = db.StringProperty()
-	role = db.StringProperty(required=True, choices=_role_set)
-	last_login = db.DateProperty()
-	disabled = db.BooleanProperty(indexed=False)
-	email = db.StringProperty()
-	
-	def generate_session_id(self): # stored inside cookie
-		self.session_id = hashlib.sha512( os.urandom(32).encode('hex') ).hexdigest()
-		return self.session_id
-		
-	def generate_cookie_secret(self): # stored inside cookie
-		self.cookie_secret = hashlib.sha512( os.urandom(32).encode('hex') ).hexdigest()
-		return self.cookie_secret
-	
-# need to think about salting.
-# avoiding uuid module due to adding another package.
+from User import User, fetch_user
+from google.appengine.api import mail
 
 # http://stackoverflow.com/questions/9594125/salt-and-hash-a-password-in-python
-def salt_shaker(password, salt=None):
-	if salt:
-		return hashlib.sha512(password + salt).hexdigest()
-	else:
-		salt = os.urandom(32).encode('hex')
-	return hashlib.sha512(password + salt).hexdigest(), salt
+# NOTE: the need for this function shows how a set of functions needs to be moved to User
+#def salt_shaker(password, salt=None):
+#	# return hash
+#	if salt: return hashlib.sha512(password + salt).hexdigest()
+#	# return ( hash , salt ) 
+#	salt = os.urandom(32).encode('hex')
+#	return hashlib.sha512(password + salt).hexdigest(), salt
 	
-def set_cookie(username):
-	user = fetch_user(username)
-	session_id = user.generate_session_id()
-	cookie_secret = user.generate_cookie_secret()
-	response.set_cookie("username", username)
-	response.set_cookie("session", session_id, secret=cookie_secret, secure=True)
-	user.put() # update user with cookie_sercret and session_id
-	
-def validate_session_id(username, session_id):
-	user = fetch_user(username)
-	return (session_id == user.session_id)
+#def validate_session_id(username, session_id):
+#	user = fetch_user(username)
+#	return (session_id == user.session_id)
 	
 # Decorator for requiring authentication
 def require_session(func):
@@ -66,7 +37,7 @@ def require_session(func):
 		user = fetch_user( request.get_cookie("username") )
 		session_id = request.get_cookie("session", secret=user.cookie_secret)
 		if session_id != user.session_id:
-			return "IMPOSTER!!!" # and ask them to login
+			return 'IMPOSTER!!!' # and ask them to login
 		return func(*args, **kwargs)
 	return check_session
 	
@@ -76,49 +47,92 @@ app = Bottle()
 # update template path
 TEMPLATE_PATH.append("./templates")
 
-def fetch_user(username):
-	# returns user object
-	return db.GqlQuery("SELECT * FROM User WHERE name = :user", user=username).get()
-
 @app.route('/signup')
 def signup():
 	return template('signup.html')
 	
 @app.post('/signup')
-def singup_post():
+def signup_post():
 	# check user doesn't already exit
 	username = request.forms.get('username')
+	email = request.forms.get('email')
+	password = request.forms.get('pwd') # is this bad? password now in memory in two places?
 	if fetch_user(username):
 		# user already exists
 		return "user already exists! naughty you!"
 		# return error?
 	
-	hash, salt = salt_shaker(request.forms.get('pwd'))
+	#hash, salt = salt_shaker(request.forms.get('pwd'))
 	
-	User(name=username, hash=hash, salt=salt, role="user").put()
+	# user disable until e-mail verified.
+	#user = User(name=username, email=email, hash=hash, salt=salt, role="user", disabled=True)
+	user = User(name=username, email=email, role="user", disabled=True, password=password)
+	#user.create_hash(  )
 	
-	#NOTE: consider e-mail confirmation?
-	set_cookie(username)
+	# send confirmation e-mail (changes user values) and push to database in google cloud
+	send_confirmation_email(user)
+	user.put()
 	
-	# maybe go to some page saying success?
-	return template('home.html', name=username)
+	return template('confirmation_email.html')
 
+def send_confirmation_email(user):
+	# https://developers.google.com/appengine/docs/python/mail/
+	confirmation_url = "https://python-glass-canteen.appspot.com/confirmation/" + \
+					   "%s/%s:" % (user.name, user.create_confirmation())
+	sender_address = "Robinson.Aaron.C@gmail.com"
+	user_address = user.email
+	subject = "python-glass-canteen: Confirm your registration"
+	body = """
+Thank you for creating an account! Please confirm your email address by
+clicking on the link below:
+
+%s
+""" % confirmation_url
+    
+	mail.send_mail(sender_address, user_address, subject, body)
+
+@app.route('/confirmation/<username>/<secret>')
+def confirmation(username, secret):
+	user = fetch_user(username)
+
+	if user.check_confirmation(secret):
+		user.disabled = False
+		user.put()
+		# NOTE: probably not a good idea to set a cookie at this point. (Ask for password again?)
+		return template('email_verified.html', name=User.name)
+	
+	# NOTE: consider other cases?
+	return 'WATCHYA DOING HERE!'
+	
 @app.route('/login')	
 def login():
 	return template('login.html')
 
 @app.post('/login')
 def login_post():
-	# assuming user has an account
-	salt = fetch_user(request.forms.get('username')).salt
-	hash = salt_shaker(request.forms.get('pwd'), salt)
-	return template('home.html', name=request.forms.get('username'))
+	# TODO: rewrite rewrite rewrite.
+	# NOTE: assuming user has an account (TODO: fix this assumption)
+	user = fetch_user(request.forms.get('username'))
+	#hash = salt_shaker(request.forms.get('pwd'), user.salt)
+	
+	if user.check_password( request.forms.get('pwd') ):
+		# setup a cookie for the user and a session sense they logged in successfully
+		session_id = user.create_session_id()
+		cookie_secret = user.create_cookie_secret()
+		response.set_cookie("username", user.name)
+		response.set_cookie("session", session_id, secret=cookie_secret, secure=True)
+		user.put() # update user with cookie_sercret and session_id
+		return template('success_login.html', name=user.name)
+		
+	# NOTE: consider adding more cases later. (like request.forms.get('username'))
+	return template('failed_login.html', name=user.name)
 
+# NOTE: eventually do something with this?
 @app.route('/')
-@app.route('/hello/:name')
+@app.route('/hello/<name>')
 def home(name='Stranger'):
-    return template('home.html', name=name)
-
+	return template('home.html', name=name)
+	
 @app.route('/upload')
 @require_session
 def upload():
