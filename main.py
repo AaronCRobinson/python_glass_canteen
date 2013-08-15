@@ -17,19 +17,6 @@ import hashlib
 from User import User, fetch_user
 from google.appengine.api import mail
 
-# http://stackoverflow.com/questions/9594125/salt-and-hash-a-password-in-python
-# NOTE: the need for this function shows how a set of functions needs to be moved to User
-#def salt_shaker(password, salt=None):
-#	# return hash
-#	if salt: return hashlib.sha512(password + salt).hexdigest()
-#	# return ( hash , salt ) 
-#	salt = os.urandom(32).encode('hex')
-#	return hashlib.sha512(password + salt).hexdigest(), salt
-	
-#def validate_session_id(username, session_id):
-#	user = fetch_user(username)
-#	return (session_id == user.session_id)
-	
 # Decorator for requiring authentication
 def require_session(func):
 	def check_session(*args, **kwargs):
@@ -65,13 +52,11 @@ def signup_post():
 	#hash, salt = salt_shaker(request.forms.get('pwd'))
 	
 	# user disable until e-mail verified.
-	#user = User(name=username, email=email, hash=hash, salt=salt, role="user", disabled=True)
 	user = User(name=username, email=email, role="user", disabled=True, password=password)
-	#user.create_hash(  )
 	
 	# send confirmation e-mail (changes user values) and push to database in google cloud
 	send_confirmation_email(user)
-	user.put()
+	#user.put()
 	
 	return template('confirmation_email.html')
 
@@ -96,8 +81,7 @@ def confirmation(username, secret):
 	user = fetch_user(username)
 
 	if user.check_confirmation(secret):
-		user.disabled = False
-		user.put()
+		user.enable()
 		# NOTE: probably not a good idea to set a cookie at this point. (Ask for password again?)
 		return template('email_verified.html', name=User.name)
 	
@@ -117,11 +101,10 @@ def login_post():
 	
 	if user.check_password( request.forms.get('pwd') ):
 		# setup a cookie for the user and a session sense they logged in successfully
-		session_id = user.create_session_id()
-		cookie_secret = user.create_cookie_secret()
+		session_id, cookie_secret = user.create_new_session()
 		response.set_cookie("username", user.name)
 		response.set_cookie("session", session_id, secret=cookie_secret, secure=True)
-		user.put() # update user with cookie_sercret and session_id
+		#user.put() # update user with cookie_sercret and session_id
 		return template('success_login.html', name=user.name)
 		
 	# NOTE: consider adding more cases later. (like request.forms.get('username'))
@@ -166,18 +149,6 @@ def get_image(image):
 @app.error(404)
 @app.error(500)
 def error_handler():
-	html = """
-	<html>
-		<head>
-			<title> Error Land </title>
-		</head>
-		<body>
-			Message for you sir <br/>
-			From Bottle <br/>
-			<embed type="application/x-shockwave-flash" src="http://www.4shared.com/flash/player.swf?ver=9051" style="" quality="high" allowscriptaccess="always" allowfullscreen="false" wmode="opaque" flashvars="file=http://jakesplace.info/droid/media/message_for_you_sir.mp3&amp;volume=50&amp;autoplay=true;play=true;" height="20" width="200" play="true" autplay="true"><br/>
-		</body>
-	</html>
-	"""
-	return html
+	return "<html><title> Gotta catch 'em all! </title><body> A Wild ERROR appears! </body></html>"
 
 run(app=app, server='gae', debug=False)

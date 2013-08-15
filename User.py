@@ -6,6 +6,7 @@ def fetch_user(username):
 	# returns user object
 	return db.GqlQuery("SELECT * FROM User WHERE name = :user", user=username).get()
 
+# On hashing -- http://stackoverflow.com/questions/9594125/salt-and-hash-a-password-in-python
 class User(db.Model):
 	_role_set = set(["admin","user"])
 	name = db.StringProperty(required=True)
@@ -19,32 +20,32 @@ class User(db.Model):
 	email = db.StringProperty()
 	
 	def __init__(self, *args, **kwargs):
-		# NOTE: password should be there or else we are hosed
 		if 'password' in kwargs: 
 			kwargs['hash'], kwargs['salt'] = self._create_hash( kwargs['password'] )
 		super(User, self).__init__(*args, **kwargs)
+		if 'password' in kwargs: self.put() # Then we know this is a new user.
+			
+	def _create_hash(self, password):
+		salt = os.urandom(32).encode('hex')
+		hash = hashlib.sha512(password + salt).hexdigest()
+		return hash, salt
 	
-	def create_session_id(self): # stored inside cookie
+	def create_new_session(self): # stored inside cookie
+		# NOTE: session id could probably be md5?
 		self.session_id = hashlib.sha512( os.urandom(32).encode('hex') ).hexdigest()
-		return self.session_id
-		
-	def create_cookie_secret(self): # stored inside cookie
 		self.cookie_secret = hashlib.sha512( os.urandom(32).encode('hex') ).hexdigest()
-		return self.cookie_secret
+		self.put()
+		return self.session_id, self.cookie_secret
 	
 	def create_confirmation(self):
 		# We are going to use cookie_secret because 
 		# it won't have a value till after confirmation
 		self.cookie_secret = hashlib.md5().hexdigest()
+		self.put()
 		return self.cookie_secret
 		
 	def check_confirmation(self, secret):
 		return self.cookie_secret == secret
-		
-	def _create_hash(self, password):
-		salt = os.urandom(32).encode('hex')
-		hash = hashlib.sha512(password + salt).hexdigest()
-		return hash, salt
 		
 	def check_password(self, password):
 		# NOTE: this is more like a "check_auth"...
@@ -52,3 +53,8 @@ class User(db.Model):
 		if self.disabled == False and self.hash == hash:
 			return True
 		return False
+		
+	def enable(self):
+		self.disabled = False
+		self.put()
+		return
