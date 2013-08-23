@@ -20,6 +20,10 @@ handlers:
   script: main.app
   secure: always
 
+- url: /upload
+  script: main.app 
+  secure: always
+
 - url: /browse
   script: main.app 
   secure: always

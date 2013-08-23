@@ -5,28 +5,30 @@ import sys, os
 # NOTE: this is where any new modules we are adding to python live
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "modules"))
 # webserver
-from bottle import Bottle, run, request, response
+from bottle import Bottle, run, request, response, redirect
 # templates
 import jinja2
 from bottle import TEMPLATE_PATH, jinja2_template as template
 # for upload function
 from google.appengine.ext import blobstore
-# salted passwords
-import hashlib
 
 from User import User, fetch_user
 from google.appengine.api import mail
 
+import mimetypes
+
 # Decorator for requiring authentication
-def require_session(func):
-	def check_session(*args, **kwargs):
-		# NOTE needs to be SSL since secure cookie.
-		user = fetch_user( request.get_cookie("username") )
-		session_id = request.get_cookie("session", secret=user.cookie_secret)
-		if session_id != user.session_id:
-			return 'IMPOSTER!!!' # and ask them to login
-		return func(*args, **kwargs)
-	return check_session
+def require_session(func, pass_through=True):
+	if not pass_through:
+		def check_session(*args, **kwargs):
+			# NOTE needs to be SSL since secure cookie.
+			user = fetch_user( request.get_cookie("username") )
+			session_id = request.get_cookie("session", secret=user.cookie_secret)
+			if session_id != user.session_id:
+				return 'IMPOSTER!!!' # and ask them to login
+			return func(*args, **kwargs)
+		return check_session
+	return func # otherwise return original function
 	
 # setup app wrapper
 app = Bottle()
@@ -120,19 +122,31 @@ def home(name='Stranger'):
 @require_session
 def upload():
 	return template( 'upload.html', upload_url = blobstore.create_upload_url('/upload') )
-
+	
 @app.post('/upload')
 @require_session
-def upload_post():
-	# NOTE: consider validating the filename...
-	# beware of file.filename -> it normalizes names; we like our names weird.
-	# consider redirect here
-	return template( 'upload.html', filename = request.files.get('file').raw_filename )
+def upload_post_processing():
+	file = request.files.get('file').raw_filename 
+	# validate file is image format
+	#valid_formats = ['image/x-png', 'image/jpeg', 'image/gif', 'image/bmp']
+	if mimetypes.guess_type(file)[0].split('/')[0] != 'image':
+		# need to delete blob?
+		return "Invalid filetype!"
+		#return template( 'upload_error.html')
+	
+	redirect()
+	
+@app.post('/upload/<file>')		
+def upload_post_html(file):
+	#redirect( "/images/" + file )
+	return template( 'upload_success.html', filename = file )
  
 @app.route('/browse')
 def browse_images():
 	# this should be temporary. Bad way of doing this (that is passing that object)
-	return template( 'browse.html', blobstore_query = blobstore.BlobInfo.all())
+	#if mimetypes.guess_type(file).split('/')[0] != 'image':
+	#results = blobstore.BlobInfo.gql("WHERE content_type = ")
+	return template( 'browse.html', blobstore_results = blobstore.BlobInfo.all())
 	
 @app.route("/images/<image:re:.+>")
 def get_image(image):
@@ -142,13 +156,19 @@ def get_image(image):
 	open BlobReader with BlobInfo keyand read data -> return raw data
 	"""
 	#TODO: consider some kind of validation
-	response.content_type = 'image/jpeg'
-	blob_info = blobstore.BlobInfo.all().filter('filename',image).get()
-	return blobstore.BlobReader(blob_info.key()).read()
+	#response.content_type = 'image/jpeg'
+	#blob_info = blobstore.BlobInfo.gql("SELECT * FROM BlobInfo WHERE filename = :fname", fname=image)
+	blob_info = blobstore.BlobInfo.gql("WHERE filename = :fname", fname=image).get()
+	response.content_type = blob_info.content_type
+	#blob_info = blobstore.BlobInfo.all().filter('filename',image).get()
+	return blobstore.BlobReader(blob_info).read()
 
-@app.error(404)
 @app.error(500)
-def error_handler():
+def error_handler_500():
+	return "<html><title> Gotta catch 'em all! </title><body> A Wild ERROR appears! </body></html>"
+	
+@app.error(404)
+def error_handler_404():
 	return "<html><title> Gotta catch 'em all! </title><body> A Wild ERROR appears! </body></html>"
 
 run(app=app, server='gae', debug=False)
