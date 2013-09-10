@@ -19,17 +19,15 @@ from google.appengine.api import mail
 import mimetypes
 
 # Decorator for requiring authentication
-def require_session(func, pass_through=True):
-	if not pass_through:
-		def check_session(*args, **kwargs):
-			# NOTE needs to be SSL since secure cookie.
-			user = fetch_user( request.get_cookie('username') )
-			session_id = request.get_cookie('session', secret=user.cookie_secret)
-			if session_id != user.session_id:
-				return 'IMPOSTER!!!' # and ask them to login
-			return func(*args, **kwargs)
-		return check_session
-	return func # otherwise return original function
+def require_session(func):
+	def check_session(*args, **kwargs):
+		# NOTE needs to be SSL since secure cookie.
+		user = fetch_user( request.get_cookie('username') )
+		session_id = request.get_cookie('session', secret=user.cookie_secret)
+		if session_id != user.session_id:
+			return 'IMPOSTER!!!' # and ask them to login
+		return func(*args, **kwargs)
+	return check_session
 	
 # setup app wrapper
 app = Bottle()
