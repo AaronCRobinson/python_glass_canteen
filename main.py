@@ -11,6 +11,7 @@ import jinja2
 from bottle import TEMPLATE_PATH, jinja2_template as template
 # for upload function
 from google.appengine.ext import blobstore
+from google.appengine.ext.blobstore import BlobInfo
 
 from User import User, fetch_user
 from google.appengine.api import mail
@@ -22,8 +23,8 @@ def require_session(func, pass_through=True):
 	if not pass_through:
 		def check_session(*args, **kwargs):
 			# NOTE needs to be SSL since secure cookie.
-			user = fetch_user( request.get_cookie("username") )
-			session_id = request.get_cookie("session", secret=user.cookie_secret)
+			user = fetch_user( request.get_cookie('username') )
+			session_id = request.get_cookie('session', secret=user.cookie_secret)
 			if session_id != user.session_id:
 				return 'IMPOSTER!!!' # and ask them to login
 			return func(*args, **kwargs)
@@ -51,14 +52,10 @@ def signup_post():
 		return "user already exists! naughty you!"
 		# return error?
 	
-	#hash, salt = salt_shaker(request.forms.get('pwd'))
-	
 	# user disable until e-mail verified.
 	user = User(name=username, email=email, role="user", disabled=True, password=password)
-	
 	# send confirmation e-mail (changes user values) and push to database in google cloud
 	send_confirmation_email(user)
-	#user.put()
 	
 	return template('confirmation_email.html')
 
@@ -104,8 +101,8 @@ def login_post():
 	if user.check_password( request.forms.get('pwd') ):
 		# setup a cookie for the user and a session sense they logged in successfully
 		session_id, cookie_secret = user.create_new_session()
-		response.set_cookie("username", user.name)
-		response.set_cookie("session", session_id, secret=cookie_secret, secure=True)
+		response.set_cookie('username', user.name)
+		response.set_cookie('session', session_id, secret=cookie_secret, secure=True)
 		#user.put() # update user with cookie_sercret and session_id
 		return template('success_login.html', name=user.name)
 		
@@ -121,33 +118,34 @@ def home(name='Stranger'):
 @app.route('/upload')
 @require_session
 def upload():
-	return template( 'upload.html', upload_url = blobstore.create_upload_url('/upload') )
+	return template('upload.html', upload_url = blobstore.create_upload_url('/upload') )
 	
 @app.post('/upload')
 @require_session
 def upload_post_processing():
-	file = request.files.get('file').raw_filename 
+	file = request.files.data.filename
 	# validate file is image format
-	#valid_formats = ['image/x-png', 'image/jpeg', 'image/gif', 'image/bmp']
 	if mimetypes.guess_type(file)[0].split('/')[0] != 'image':
-		# need to delete blob?
-		return "Invalid filetype!"
-		#return template( 'upload_error.html')
+		# delete non-image file types
+		BlobInfo.gql("WHERE filename = :fname", fname=file).get().delete()
+		return template('upload_error.html')
 	
-	redirect()
+	response.set_cookie('img', file, path='/')
+	redirect('/upload_success')
 	
-@app.post('/upload/<file>')		
-def upload_post_html(file):
-	#redirect( "/images/" + file )
-	return template( 'upload_success.html', filename = file )
+@app.route('/upload_success')		
+def upload_success():
+	file = request.get_cookie('img')
+	# NOTE: consider deleting cookie?
+	return template('upload_success.html', filename = file )
  
 @app.route('/browse')
 def browse_images():
-	# this should be temporary. Bad way of doing this (that is passing that object)
-	#if mimetypes.guess_type(file).split('/')[0] != 'image':
-	#results = blobstore.BlobInfo.gql("WHERE content_type = ")
-	return template( 'browse.html', blobstore_results = blobstore.BlobInfo.all())
+	# NOTE: consider grabbing via GPL only certain file types.
+	# NOTE: This assumes that all blobs are images...
+	return template('browse.html', blobstore_results = BlobInfo.all())
 	
+# NOTE: currently images of the same name can be saved but retrieving here is a bit of a dice roll...
 @app.route("/images/<image:re:.+>")
 def get_image(image):
 	"""
@@ -155,12 +153,9 @@ def get_image(image):
 	query blobstore, filter on filename, and execute query -> get BlobInfo
 	open BlobReader with BlobInfo keyand read data -> return raw data
 	"""
-	#TODO: consider some kind of validation
-	#response.content_type = 'image/jpeg'
-	#blob_info = blobstore.BlobInfo.gql("SELECT * FROM BlobInfo WHERE filename = :fname", fname=image)
-	blob_info = blobstore.BlobInfo.gql("WHERE filename = :fname", fname=image).get()
+	#TODO: consider some kind of validation of file type and content?
+	blob_info = BlobInfo.gql("WHERE filename = :fname", fname=image).get()
 	response.content_type = blob_info.content_type
-	#blob_info = blobstore.BlobInfo.all().filter('filename',image).get()
 	return blobstore.BlobReader(blob_info).read()
 
 @app.error(500)
